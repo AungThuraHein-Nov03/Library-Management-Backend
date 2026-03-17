@@ -11,13 +11,15 @@ import { ObjectId } from "mongodb";
 // INIT -> ACCEPTED (ADMIN)
 // INIT -> CANCEL-ADMIN (ADMIN)
 // INIT -> CANCEL-USER (USER - own request only)
+// ACCEPTED -> RETURNED (ADMIN)
 // CLOSE-NO-AVAILABLE-BOOK is a terminal state (no transitions out)
-// ACCEPTED is a terminal state
+// RETURNED is a terminal state
 // CANCEL-ADMIN is a terminal state
 // CANCEL-USER is a terminal state
 
 const VALID_TRANSITIONS = {
-  "INIT": ["ACCEPTED", "CANCEL-ADMIN", "CANCEL-USER"]
+  "INIT": ["ACCEPTED", "CANCEL-ADMIN", "CANCEL-USER"],
+  "ACCEPTED": ["RETURNED"]
 };
 
 export async function OPTIONS(req) {
@@ -80,7 +82,7 @@ export async function PATCH(req, { params }) {
     }
 
     // Role-based transition rules
-    if (newStatus === "ACCEPTED" || newStatus === "CANCEL-ADMIN") {
+    if (newStatus === "ACCEPTED" || newStatus === "CANCEL-ADMIN" || newStatus === "RETURNED") {
       if (user.role !== "ADMIN") {
         return NextResponse.json({
           message: "Only ADMIN can perform this action"
@@ -124,6 +126,14 @@ export async function PATCH(req, { params }) {
 
     // If cancelling an INIT request, restore book availability
     if ((newStatus === "CANCEL-ADMIN" || newStatus === "CANCEL-USER") && borrow.status === "INIT") {
+      await db.collection("books").updateOne(
+        { _id: new ObjectId(borrow.bookId) },
+        { $inc: { available: 1 } }
+      );
+    }
+
+    // When an accepted borrow is returned, restore book availability
+    if (newStatus === "RETURNED" && borrow.status === "ACCEPTED") {
       await db.collection("books").updateOne(
         { _id: new ObjectId(borrow.bookId) },
         { $inc: { available: 1 } }
