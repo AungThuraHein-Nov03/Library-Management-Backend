@@ -8,6 +8,12 @@ import { requireAuth, requireRole } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 
+function clampPosition(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(100, Math.max(0, parsed));
+}
+
 export async function OPTIONS(req) {
   return new Response(null, {
     status: 200,
@@ -97,6 +103,9 @@ export async function PATCH(req, { params }) {
     if (available !== undefined) updateFields.available = available;
     if (data.location !== undefined) updateFields.location = data.location;
     if (data.status !== undefined) updateFields.status = data.status;
+    if (data.coverImage !== undefined) updateFields.coverImage = data.coverImage;
+    if (data.coverPositionX !== undefined) updateFields.coverPositionX = clampPosition(data.coverPositionX);
+    if (data.coverPositionY !== undefined) updateFields.coverPositionY = clampPosition(data.coverPositionY);
     updateFields.updatedAt = new Date();
     updateFields.updatedBy = user.id;
 

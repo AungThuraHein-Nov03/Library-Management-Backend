@@ -7,6 +7,12 @@ import { getClientPromise } from "@/lib/mongodb";
 import { requireAuth, requireRole } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
+function clampPosition(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(100, Math.max(0, parsed));
+}
+
 export async function OPTIONS(req) {
   return new Response(null, {
     status: 200,
@@ -70,6 +76,8 @@ export async function POST(req) {
   try {
     const data = await req.json();
     const { title, author, isbn, description, quantity } = data;
+    const coverPositionX = clampPosition(data.coverPositionX);
+    const coverPositionY = clampPosition(data.coverPositionY);
 
     if (!title || !author || !isbn) {
       return NextResponse.json({
@@ -90,6 +98,9 @@ export async function POST(req) {
       quantity: quantity || 1,
       available: quantity || 1,
       location: data.location || "",
+      coverImage: data.coverImage || "",
+      coverPositionX,
+      coverPositionY,
       status: "ACTIVE",
       createdAt: new Date(),
       createdBy: user.id
