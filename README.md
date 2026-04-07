@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.js`. The page auto-updates
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Portfolio Note: Cover Image Storage
+
+Book cover uploads are intentionally stored on the backend local filesystem at `public/uploads/covers`.
+
+This is fine for portfolio/demo usage because it keeps setup simple and avoids external storage dependencies.
+
+For production, use persistent storage (for example Docker volume mounts or object storage like S3/Azure Blob/Cloudinary), otherwise files can be lost when containers or servers are recreated.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
