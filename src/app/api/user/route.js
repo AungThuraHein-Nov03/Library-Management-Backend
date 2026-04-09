@@ -53,7 +53,7 @@ export async function  POST (req) {
   }
   catch (exception) {
     const errorMsg = exception.toString();
-    let displayErrorMsg = "";
+    let displayErrorMsg = "Registration failed";
     if (errorMsg.includes("duplicate")) {
       if (errorMsg.includes("username")) {
         displayErrorMsg = "Duplicate Username!!"
@@ -61,6 +61,8 @@ export async function  POST (req) {
       else if (errorMsg.includes("email")) {
         displayErrorMsg = "Duplicate Email!!"
       }
+    } else if (process.env.NODE_ENV !== "production") {
+      displayErrorMsg = exception?.message || displayErrorMsg;
     }
     return NextResponse.json({
       message: displayErrorMsg

@@ -153,20 +153,25 @@ All routes return JSON.
 - `GET /api/borrow` - list borrow requests (auth required)
 	- ADMIN sees all
 	- USER sees only own records
+ 	- Overdue accepted requests are tracked and surfaced with `isOverdue` and `overdueDays`
 - `POST /api/borrow` - create request (auth required)
 	- If `book.available > 0`: status `INIT` and decrements available count
 	- Otherwise: status `CLOSE-NO-AVAILABLE-BOOK`
 - `PATCH /api/borrow/:id` - update request status (auth required)
+	- `INIT -> ACCEPTED` assigns `dueDate` (from request body `dueDate` or request `targetDate`)
+ 	- Overdue accepted requests transition to `OVERDUE` automatically when queried/updated
 
 Valid transitions:
 - `INIT -> ACCEPTED` (ADMIN)
 - `INIT -> CANCEL-ADMIN` (ADMIN)
 - `INIT -> CANCEL-USER` (request owner only)
 - `ACCEPTED -> RETURNED` (ADMIN)
+- `OVERDUE -> RETURNED` (ADMIN)
 
 Inventory restoration:
 - `INIT -> CANCEL-ADMIN` or `INIT -> CANCEL-USER`: increments `books.available`
 - `ACCEPTED -> RETURNED`: increments `books.available`
+- `OVERDUE -> RETURNED`: increments `books.available`
 
 ## CORS and Frontend Integration
 

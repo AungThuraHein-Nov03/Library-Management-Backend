@@ -8,6 +8,22 @@ import { requireAuth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function getOverdueDays(dueDate, referenceDate = new Date()) {
+  if (!dueDate) return 0;
+  const diff = referenceDate.getTime() - dueDate.getTime();
+  if (diff <= 0) return 0;
+  return Math.floor(diff / DAY_IN_MS);
+}
+
 export async function OPTIONS(req) {
   return new Response(null, {
     status: 200,
@@ -30,6 +46,20 @@ export async function GET(req) {
   try {
     const client = await getClientPromise();
     const db = client.db("library");
+
+    // Keep overdue tracking up-to-date when records are queried.
+    await db.collection("borrows").updateMany(
+      {
+        status: "ACCEPTED",
+        dueDate: { $type: "date", $lt: new Date() }
+      },
+      {
+        $set: {
+          status: "OVERDUE",
+          overdueMarkedAt: new Date()
+        }
+      }
+    );
     
     let query = {};
     // ADMIN can see all requests, USER sees only their own
@@ -38,7 +68,21 @@ export async function GET(req) {
     }
     
     const requests = await db.collection("borrows").find(query).toArray();
-    return NextResponse.json(requests, {
+    const now = new Date();
+    const requestsWithOverdueInfo = requests.map((request) => {
+      const dueDate = request.dueDate ? new Date(request.dueDate) : null;
+      const hasValidDueDate = dueDate && !Number.isNaN(dueDate.getTime());
+      const trackable = request.status === "ACCEPTED" || request.status === "OVERDUE";
+      const overdueDays = trackable && hasValidDueDate ? getOverdueDays(dueDate, now) : 0;
+
+      return {
+        ...request,
+        isOverdue: overdueDays > 0,
+        overdueDays,
+      };
+    });
+
+    return NextResponse.json(requestsWithOverdueInfo, {
       headers: corsHeaders
     });
   } catch (error) {
@@ -79,6 +123,16 @@ export async function POST(req) {
     if (!targetDate) {
       return NextResponse.json({
         message: "Target date is required"
+      }, {
+        status: 400,
+        headers: corsHeaders
+      });
+    }
+
+    const parsedTargetDate = parseDateInput(targetDate);
+    if (!parsedTargetDate) {
+      return NextResponse.json({
+        message: "Target date is invalid"
       }, {
         status: 400,
         headers: corsHeaders
@@ -134,7 +188,10 @@ export async function POST(req) {
       userEmail: user.email,
       status: status,
       createdAt: new Date(),
-      targetDate: new Date(targetDate)
+      targetDate: parsedTargetDate,
+      dueDate: null,
+      acceptedAt: null,
+      returnedAt: null
     });
 
     return NextResponse.json({

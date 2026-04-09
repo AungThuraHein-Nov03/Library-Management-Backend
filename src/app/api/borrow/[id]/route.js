@@ -7,11 +7,20 @@ import { requireAuth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 
+function parseDateInput(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
 // Valid status transitions:
 // INIT -> ACCEPTED (ADMIN)
 // INIT -> CANCEL-ADMIN (ADMIN)
 // INIT -> CANCEL-USER (USER - own request only)
 // ACCEPTED -> RETURNED (ADMIN)
+// ACCEPTED -> OVERDUE (automatic tracking)
+// OVERDUE -> RETURNED (ADMIN)
 // CLOSE-NO-AVAILABLE-BOOK is a terminal state (no transitions out)
 // RETURNED is a terminal state
 // CANCEL-ADMIN is a terminal state
@@ -19,7 +28,8 @@ import { ObjectId } from "mongodb";
 
 const VALID_TRANSITIONS = {
   "INIT": ["ACCEPTED", "CANCEL-ADMIN", "CANCEL-USER"],
-  "ACCEPTED": ["RETURNED"]
+  "ACCEPTED": ["RETURNED"],
+  "OVERDUE": ["RETURNED"]
 };
 
 export async function OPTIONS(req) {
@@ -70,11 +80,32 @@ export async function PATCH(req, { params }) {
       });
     }
 
+    let currentStatus = borrow.status;
+    const currentDueDate = borrow.dueDate ? new Date(borrow.dueDate) : null;
+    if (
+      currentStatus === "ACCEPTED" &&
+      currentDueDate &&
+      !Number.isNaN(currentDueDate.getTime()) &&
+      currentDueDate < new Date()
+    ) {
+      currentStatus = "OVERDUE";
+      await db.collection("borrows").updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status: "OVERDUE",
+            overdueMarkedAt: new Date(),
+            updatedAt: new Date(),
+          }
+        }
+      );
+    }
+
     // Check valid transition
-    const allowed = VALID_TRANSITIONS[borrow.status];
+    const allowed = VALID_TRANSITIONS[currentStatus];
     if (!allowed || !allowed.includes(newStatus)) {
       return NextResponse.json({
-        message: `Cannot transition from ${borrow.status} to ${newStatus}`
+        message: `Cannot transition from ${currentStatus} to ${newStatus}`
       }, {
         status: 400,
         headers: corsHeaders
@@ -113,19 +144,54 @@ export async function PATCH(req, { params }) {
     }
 
     // Update the status
+    const updateFields = {
+      status: newStatus,
+      updatedAt: new Date(),
+      updatedBy: user.id
+    };
+
+    if (newStatus === "ACCEPTED") {
+      const now = new Date();
+      const requestedDueDate = parseDateInput(data.dueDate);
+      const targetDueDate = parseDateInput(borrow.targetDate);
+      const dueDate = requestedDueDate || targetDueDate;
+
+      if (!dueDate) {
+        return NextResponse.json({
+          message: "Cannot assign due date: missing valid target date"
+        }, {
+          status: 400,
+          headers: corsHeaders
+        });
+      }
+
+      if (dueDate <= now) {
+        return NextResponse.json({
+          message: "Due date must be in the future"
+        }, {
+          status: 400,
+          headers: corsHeaders
+        });
+      }
+
+      updateFields.acceptedAt = now;
+      updateFields.dueDate = dueDate;
+      updateFields.overdueMarkedAt = null;
+    }
+
+    if (newStatus === "RETURNED") {
+      updateFields.returnedAt = new Date();
+    }
+
     await db.collection("borrows").updateOne(
       { _id: new ObjectId(id) },
       {
-        $set: {
-          status: newStatus,
-          updatedAt: new Date(),
-          updatedBy: user.id
-        }
+        $set: updateFields
       }
     );
 
     // If cancelling an INIT request, restore book availability
-    if ((newStatus === "CANCEL-ADMIN" || newStatus === "CANCEL-USER") && borrow.status === "INIT") {
+    if ((newStatus === "CANCEL-ADMIN" || newStatus === "CANCEL-USER") && currentStatus === "INIT") {
       await db.collection("books").updateOne(
         { _id: new ObjectId(borrow.bookId) },
         { $inc: { available: 1 } }
@@ -133,7 +199,7 @@ export async function PATCH(req, { params }) {
     }
 
     // When an accepted borrow is returned, restore book availability
-    if (newStatus === "RETURNED" && borrow.status === "ACCEPTED") {
+    if (newStatus === "RETURNED" && (currentStatus === "ACCEPTED" || currentStatus === "OVERDUE")) {
       await db.collection("books").updateOne(
         { _id: new ObjectId(borrow.bookId) },
         { $inc: { available: 1 } }

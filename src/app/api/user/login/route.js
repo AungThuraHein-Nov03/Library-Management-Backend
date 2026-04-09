@@ -74,8 +74,15 @@ export async function POST(req) {
     });
     return response;
   } catch (exception) {
+    console.error("Login route error:", exception);
+
+    const message =
+      process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : exception?.message || "Internal server error";
+
     return NextResponse.json({
-      message: "Internal server error"
+      message
     }, {
       status: 500,
       headers: corsHeaders
